@@ -55,8 +55,9 @@ ndeletedfiles=0
 ndeletedbytes=0
 targetfilesize=0
 
-# Flag for quiet mode
+# Flags for quiet and verbose modes
 isquiet="0"
+isverbose="0"
 
 # Parse input arguments
 while [[ "$1" =~ ^- && ! "$1" == "--" ]]; do case $1 in
@@ -72,12 +73,16 @@ while [[ "$1" =~ ^- && ! "$1" == "--" ]]; do case $1 in
     echo "    -p | --print-statistics       Print statistical information before exiting."
     echo "    -q | --quiet                  Run in quiet mode."
     echo "    -s | --sha512sum              Use sha512sum for hashing. Otherwise default method is md5sum."
-    echo "    -v | --version                Show version."
-    exit
+    echo "    -v | --verbose                Verbose mode.  Causes do-checksum to print debugging messages about its progress."
+    echo "    -V | --version                Show version."
+    exit 1
     ;;
-  -v | --version )
-    echo "version: 0.0.1"
-    exit
+  -V | --version )
+    echo "version: 0.1.1"
+    exit 1
+    ;;
+  -v | --verbose )
+    isverbose="1"
     ;;
   -s | --sha512sum )
     hashfunc="sha512sum" # Use md5sum if not set
@@ -98,9 +103,16 @@ esac; shift; done
 if [[ "$1" == '--' ]]; then shift; fi
 
 # Check if source & target dirs do exist
-if [[ ! -e $SOURCE ]] ; then echo "Source directory $SOURCE does not exist. Exiting..." ; exit ; fi
-if [[ ! -e $TARGET ]] ; then echo "Target directory $TARGET does not exist. Exiting..." ; exit ; fi
+if [[ ! -e $SOURCE ]] ; then echo "Source directory $SOURCE does not exist. Exiting..." ; exit 1 ; fi
+if [[ ! -e $TARGET ]] ; then echo "Target directory $TARGET does not exist. Exiting..." ; exit 1 ; fi
 
+# Quit if quiet and verbose modes are both enabled
+if [[ $isquiet == "1" && $isverbose == "1" ]] ; then 
+    echo "Please do not enable quiet and verbose modes at the same time. Exiting..."
+    exit 1
+fi
+
+# Check number of files before running checksums
 while IFS= read -r -d '' sourcefile; 
 do
     nsourcefiles=$((nsourcefiles + 1))
@@ -115,8 +127,9 @@ echo "There are $nsourcefiles $EXT files in $SOURCE"
 echo "There are $ntargetfiles $EXT files in $TARGET"
 echo
 
-if [[ $nsourcefiles -eq 0 ]] ; then echo "No files found in the source directory.  Exiting..." ; exit ; fi
-if [[ $ntargetfiles -eq 0 ]] ; then echo "No files found in the target directory.  Exiting..." ; exit ; fi
+# Exit if no files are found
+if [[ $nsourcefiles -eq 0 ]] ; then echo "No files found in the source directory.  Exiting..." ; exit 1 ; fi
+if [[ $ntargetfiles -eq 0 ]] ; then echo "No files found in the target directory.  Exiting..." ; exit 1 ; fi
 
 set_hash_func "$hashfunc"
 
@@ -131,7 +144,9 @@ while IFS= read -r -d '' sourcefile;
 do
     sourcehash=$(get_file_hash "$sourcefile" | awk '{print $1}')
     nsourcefiles=$((nsourcefiles + 1))
-    if [[ $isquiet == "0" ]] ; then
+
+    # Print each source file only in verbose mode
+    if [[ $isquiet == "0" && $isverbose == "1" ]] ; then
         echo "+ File index $nsourcefiles. File name: $sourcefile has hash $sourcehash"
     fi
 
@@ -139,31 +154,44 @@ do
     do
         targethash=$(get_file_hash "$targetfile" | awk '{print $1}')
         if [[ $sourcehash == $targethash && $sourcefile != $targetfile ]] ; then
+            
+            # Print source file in the non-verbose mode
+            if [[ $isquiet == "0" && $isverbose == "0" ]] ; then
+                echo "+ File index $nsourcefiles. File name: $sourcefile has hash $sourcehash"
+            fi
+            
             nfoundfiles=$((nfoundfiles + 1))
             targetfilesize=$(get_file_size "$targetfile")
+
+            # Print this information regardless of verbosity
             if [[ $isquiet == "0" ]] ; then
                 echo "  - Found file: $targetfile with hash $targethash" 
             fi
+
             # Delete only if not in dry-run mode
             if [[ $dryrun == "0" ]] ; then
                 remove_file "$targetfile"
                 if [[ $? -eq 0 ]] ; then
+                    # Print this information regardless of verbosity
                     if [[ $isquiet == "0" ]] ; then
                         echo "  - File deleted successfully."
                     fi
                 else
                     echo "An error occurred. Exiting..."
-                    exit
+                    exit 1
                 fi
                 if [[ $isprint == 1 ]] ; then
                     ndeletedfiles=$((ndeletedfiles + 1))
                     # if (MAXSIZE - ndeletedbytes) < targetfilesize -> stop counting bytes
                     ndeletedbytes=$((ndeletedbytes + $targetfilesize))
                 fi
+                if [[ $isquiet == "0" && $isverbose == "0" ]] ; then
+                    echo
+                fi
             fi
         fi      
     done < <(find $TARGET -type f -iname "*.${EXT}" -print0)
-    if [[ $isquiet == "0" ]] ; then
+    if [[ $isquiet == "0" && $isverbose == "1" ]] ; then
         echo
     fi
 done < <(find $SOURCE -type f -iname "*.${EXT}" -print0)
